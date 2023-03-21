@@ -17,12 +17,18 @@ Over-Sampling Strategy in Feature Space for Graphs based Class-imbalanced Bot De
 
 # Usage 
 ````
-python main.py -dataset dataset -model model
+python OS-GNN.py -dataset dataset -model model --smote smote
 ````
 * **dataset**: including \[MGTAB, Twibot-20, Cresci-15\].  
 * **model**: including \['GCN', 'GAT', 'SAGE', 'RGCN'\].  
+* **smote**: including \[True, False\].  
 
-e.g.  
+e.g. 
+Vanilla GCN on the MGTAB dataset
 ````
-python main.py -dataset MGTAB -model GCN
+python OS-GNN.py -dataset MGTAB -model GCN -smote False
+````
+OS-GAT on the Twibot-20 dataset
+````
+python OS-GNN.py -dataset Twibot-20 -model GAT -smote True
 ````
