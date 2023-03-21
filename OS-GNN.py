@@ -17,7 +17,7 @@ warnings.filterwarnings('ignore')
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='MGTAB', choices=['GCN, GAT, GraphSage, R'], help='dataset')
+parser.add_argument('--dataset', type=str, default='MGTAB', choices=['MGTAB', 'Twibot-20', 'Cresci-15'], help='dataset')
 parser.add_argument('--relation_select', type=list, default=[0,1], help='selection of relations in the graph (0-6)')
 parser.add_argument('--random_seed', type=list, default=[0,1,2,3,4], help='selection of random seeds')
 parser.add_argument('--smote', type=bool, default=False, help='whether use smoteGCN')
@@ -44,7 +44,7 @@ def main(seed):
     if args.dataset == 'MGTAB':
         dataset = MGTAB('./Data/MGTAB')
         data.y = data.y2
-    elif args.dataset == 'Twibot20':
+    elif args.dataset == 'Twibot-20':
         dataset = Twibot20('./Data/Twibot20')
     else:
         dataset = Cresci15('./Data/Cresci15')
