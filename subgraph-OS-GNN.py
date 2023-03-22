@@ -4,9 +4,8 @@ import numpy as np
 import argparse
 import time
 from Dataset import MGTAB, Twibot20, Cresci15
-from models import  GCN, SAGE, GAT, RGCN
+from models import RGCN, GAT, GCN, SAGE
 from models import SMOTERGCN, SMOTEGAT, SMOTEGCN, SMOTESAGE
-from torch_geometric.loader import NeighborLoader
 from sklearn.utils import shuffle
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from utils import normalize, sparse_mx_to_torch_sparse_tensor, sample_mask, MLSMOTE, balance_MLSMOTE
@@ -16,17 +15,18 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-dataset', type=str, choices=['MGTAB', 'Twibot20', 'Cresci15'], help='dataset')
-parser.add_argument('-model', type=str, choices=['GCN', 'GAT', 'SAGE', 'RGCN'], help='selection of model')
-parser.add_argument('-smote', type=bool, help='whether use smoteGCN')
+parser.add_argument('-model', type=str, default='GAT', help='GCN, GAT, SAGE, RGCN')
+parser.add_argument('-smote', type=bool, default=True, help='whether use smoteGCN')
+parser.add_argument('-ratio', type=float, default=0.05, help='imbalanced ratio')
 parser.add_argument('--relation_select', type=list, default=[0,1], nargs='+', help='selection of relations in the graph (0-6)')
-parser.add_argument('--random_seed', type=list, default=[0,1,2,3,4], nargs='+', help='selection of random seeds')
+parser.add_argument('--random_seed', type=list, default=[0,1,2,4,5], nargs='+', help='selection of random seeds')
 parser.add_argument('--balanced', type=bool, default=True, help='whether use balanced smote')
-parser.add_argument('--smote_num', type=int, default=300, help='minority sample counts after synthesis, works when balanced is False')
+parser.add_argument('--smote_num', type=int, default=300, help='number of minority class samples after synthesis, only works when balanced is set to False')
 parser.add_argument('--hidden_dimension', type=int, default=128, help='number of hidden units')
-parser.add_argument('--epochs', type=int, default=200, help='training epochs')
-parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate (1 - keep probability)')
+parser.add_argument('--dropout', type=float, default=0.5, help='dropout rate (1 - keep probability)')
 parser.add_argument('--alpha', type=float, default=0.8, help='weight of synthesized samples')
 parser.add_argument('--lr', type=float, default=1e-3, help='initial learning rate')
 parser.add_argument('--weight_decay', type=float, default=5e-4, help='weight decay for optimizer')
@@ -55,6 +55,44 @@ def main(seed):
 
     out_dim = max(data.y).item()+1
     sample_number = len(data.y)
+
+    num_count = []
+    for i in range(out_dim):
+        num_count.append(list(data.y.numpy()).count(i))
+
+    ma_cls = num_count.index(max(num_count))
+    mi_cls = num_count.index(min(num_count))
+
+    ma_mask = data.y == ma_cls
+    mi_mask = data.y == mi_cls
+    all_idx = np.array(range(len(data.y)))
+    ma_idx = all_idx[ma_mask]
+    shuffle_mi_idx = shuffle(all_idx[mi_mask], random_state=seed)
+
+    mi_idx = shuffle_mi_idx[:int(args.ratio*len(ma_idx))]
+    mi_mask = sample_mask(mi_idx, sample_number)
+    data.y = data.y[ma_mask + mi_mask]
+    data.x = data.x[ma_mask + mi_mask]
+    mi_label_mask = data.y == mi_cls
+    ma_label_mask = data.y == ma_cls
+    data.y[ma_label_mask] = 0
+    data.y[mi_label_mask] = 1
+    select_idx = all_idx[ma_mask + mi_mask]
+
+    edge_select = []
+    for i in range(data.edge_index.shape[1]):
+        edge_select.append(data.edge_index[0, i].item() in select_idx and data.edge_index[1, i].item() in select_idx)
+
+    data.edge_index = data.edge_index[:, edge_select]
+
+    select_idx2idx = {index: i for i, index in enumerate(select_idx)}
+    src = torch.tensor([select_idx2idx[index.item()] for index in data.edge_index[0, :]])
+    dst = torch.tensor([select_idx2idx[index.item()] for index in data.edge_index[1, :]])
+    data.edge_type = data.edge_type[edge_select]
+    data.edge_index = torch.cat([src.unsqueeze(dim=1), dst.unsqueeze(dim=1)], axis=1)
+    data.edge_index = data.edge_index.t().contiguous()
+
+    sample_number = len(data.y)
     shuffled_idx = shuffle(np.array(range(sample_number)), random_state=seed)
     train_idx = shuffled_idx[:int(0.1 * sample_number)]
     val_idx = shuffled_idx[int(0.1 * sample_number):int(0.2 * sample_number)]
@@ -74,61 +112,48 @@ def main(seed):
 
     relation_dict = {
         0:'followers',
-        1:'friends',
-        2:'mention',
-        3:'reply',
-        4:'quoted',
-        5:'url',
-        6:'hashtag'
+        1:'friends'
     }
-
-    print('relation used:', end=' ')
-    for features_index in args.relation_select:
-            index_select_list = index_select_list + (features_index == data.edge_type)
-            print('{}'.format(relation_dict[features_index]), end='  ')
-
-    edge_index = data.edge_index[:, index_select_list]
-    edge_type = data.edge_type[index_select_list]
-
-
+    edge_index = data.edge_index
+    edge_type = None
     features = data.x
     labels = data.y
     embedding_size = features.shape[1]
 
     if args.smote:
-        if args.model == 'SAGE':
-            train_loader = NeighborLoader(data,
-                                          num_neighbors=[50, 5],
-                                          input_nodes=torch.from_numpy(np.array(range(len(data.y)))),
-                                          batch_size=(len(data.y)))
+        boosting_features = features
+        for features_index in args.relation_select:
+            if isinstance(features_index, list):
+                for index in features_index:
+                    index_select_list = index_select_list + (index == data.edge_type)
+                    print('{}'.format(relation_dict[index]), end='  ')
+            else:
+                index_select_list = index_select_list + (features_index == data.edge_type)
+                print('{}'.format(relation_dict[features_index]), end='  ')
+            edge_index = data.edge_index[:, index_select_list]
+            edge_type = data.edge_type[index_select_list]
 
-            for batch in train_loader:
-                edge_index = batch.edge_index
-                edge_type = batch.edge_type
+            adj = sp.coo_matrix((np.ones(edge_index.cpu().shape[1]), (edge_index.cpu()[0, :], edge_index.cpu()[1, :])),
+                                shape=(features.cpu().shape[0], features.cpu().shape[0]),
+                                dtype=np.float32)
 
+            adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
+            adj = normalize(adj + sp.eye(adj.shape[0]))
+            adj = sparse_mx_to_torch_sparse_tensor(adj).to(device)
 
-        adj = sp.coo_matrix((np.ones(edge_index.cpu().shape[1]), (edge_index.cpu()[0, :], edge_index.cpu()[1, :])),
-                            shape=(features.cpu().shape[0], features.cpu().shape[0]),
-                            dtype=np.float32)
+            super_once_nodes = torch.spmm(adj, features)
+            super_twice_nodes = torch.spmm(adj, super_once_nodes)
+            boosting_features = torch.cat([boosting_features, super_twice_nodes], axis=1)
 
-        adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
-        adj = normalize(adj + sp.eye(adj.shape[0]))
-        adj = sparse_mx_to_torch_sparse_tensor(adj).to(device)
-
-        super_once_nodes = torch.spmm(adj, features)
-        super_twice_nodes = torch.spmm(adj, super_once_nodes)
-        super_twice_nodes = torch.cat([super_twice_nodes, features], axis=1)
-        features = super_twice_nodes
-        smote_embedding_size = features.shape[1]
-
-        labeled_X = super_twice_nodes[train_idx, :].cpu().numpy()
-        all_X = super_twice_nodes.cpu().numpy()
+        smote_embedding_size = boosting_features.shape[1]
+        labeled_X = boosting_features[train_idx, :].cpu().numpy()
+        all_X = boosting_features.cpu().numpy()
         labeled_y = labels[train_idx].cpu().numpy()
         all_y = labels.cpu().numpy()
         print(Counter(labeled_y))
 
         num_count = []
-        for i in range(out_dim):
+        for i in range(max(data.y) + 1):
             num_count.append(list(data.y[train_mask].cpu().numpy()).count(i))
         args.smote_num = max(num_count)
 
@@ -147,6 +172,14 @@ def main(seed):
 
         X_generate = torch.FloatTensor(np.concatenate([X_smo, all_X[idx_except_train, :]], axis=0)).cuda()
         y_generate = torch.LongTensor(np.concatenate([y_smo, all_y[idx_except_train]], axis=0)).cuda()
+    else:
+        print('relation used:', end=' ')
+        for features_index in args.relation_select:
+            index_select_list = index_select_list + (features_index == data.edge_type)
+            print('{}'.format(relation_dict[features_index]), end='  ')
+
+        edge_index = data.edge_index[:, index_select_list]
+        edge_type = data.edge_type[index_select_list]
 
 
     if args.model == 'RGCN':
@@ -169,6 +202,8 @@ def main(seed):
 
     if args.smote:
         model = SMOTEmodel
+        print('After oversampling', Counter(y_smo))
+
 
     loss = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(),
@@ -218,12 +253,6 @@ def main(seed):
             mask_class1 = (y_generate[new_idx_test] == 1)
             acc_test_class0 = accuracy_score(out[new_idx_test][mask_class0].to('cpu'), y_generate[new_idx_test][mask_class0].to('cpu'))
             acc_test_class1 = accuracy_score(out[new_idx_test][mask_class1].to('cpu'), y_generate[new_idx_test][mask_class1].to('cpu'))
-            TP = sum(y_generate[new_idx_test][mask_class1] == out[new_idx_test][mask_class1]).to('cpu')
-            FN = sum(y_generate[new_idx_test][mask_class1] != out[new_idx_test][mask_class1]).to('cpu')
-            TN = sum(y_generate[new_idx_test][mask_class0] == out[new_idx_test][mask_class0]).to('cpu')
-            FP = sum(y_generate[new_idx_test][mask_class0] != out[new_idx_test][mask_class0]).to('cpu')
-            TPR = TP/(TP+FN)
-            FPR = FP/(FP+TN)
         else:
             output = model(data.x, edge_index, edge_type)
             loss_test = loss(output[data.test_mask], labels[data.test_mask])
@@ -237,21 +266,15 @@ def main(seed):
             mask_class1 = (label[test_mask] == 1)
             acc_test_class0 = accuracy_score(out[test_mask][mask_class0], label[test_mask][mask_class0])
             acc_test_class1 = accuracy_score(out[test_mask][mask_class1], label[test_mask][mask_class1])
-            TP = sum(label[test_mask][mask_class1] == out[test_mask][mask_class1])
-            FN = sum(label[test_mask][mask_class1] != out[test_mask][mask_class1])
-            TN = sum(label[test_mask][mask_class0] == out[test_mask][mask_class0])
-            FP = sum(label[test_mask][mask_class0] != out[test_mask][mask_class0])
-            TPR = TP/(TP+FN)
-            FPR = FP/(FP+TN)
-        return acc_test, loss_test, f1, precision, recall, acc_test_class0, acc_test_class1, TPR, FPR
+        return acc_test, loss_test, f1, precision, recall, acc_test_class0, acc_test_class1
 
     model.apply(init_weights)
 
-    epochs = args.epochs
+    epochs = 200
     max_val_acc = 0
     for epoch in range(epochs):
         acc_val = train(epoch)
-        acc_test, loss_test, f1, precision, recall, acc_test_class0, acc_test_class1, TPR, FPR = test()
+        acc_test, loss_test, f1, precision, recall, acc_test_class0, acc_test_class1 = test()
         if acc_val > max_val_acc:
             max_val_acc = acc_val
             max_acc = acc_test
@@ -261,7 +284,6 @@ def main(seed):
             max_recall = recall
             max_acc_test_class0 = acc_test_class0
             max_acc_test_class1 = acc_test_class1
-            max_TPR = TPR
 
     print("Test set results:",
           "epoch= {:}".format(max_epoch),
@@ -270,37 +292,32 @@ def main(seed):
           "recall= {:.4f}".format(max_recall),
           "f1= {:.4f}".format(max_f1),
           "acc_class0= {:.4f}".format(max_acc_test_class0),
-          "acc_class1= {:.4f}".format(max_acc_test_class1),
-          "TPR= {:.4f}".format(max_TPR)
+          "acc_class1= {:.4f}".format(max_acc_test_class1)
           )
-    return max_acc, max_precision, max_recall, max_f1, max_acc_test_class0, max_acc_test_class1, TPR, FPR
+    return max_acc, max_precision, max_recall, max_f1, max_acc_test_class0, max_acc_test_class1
 
 
 if __name__ == "__main__":
 
     t = time.time()
-    acc_list = []
+    acc_list =[]
     precision_list = []
     recall_list = []
     f1_list = []
     acc_class0_list = []
     acc_class1_list = []
     bacc_list = []
-    TPR_list = []
-    FPR_list = []
 
     for i, seed in enumerate(args.random_seed):
-        print('traning {}th model\n'.format(i + 1))
-        acc, precision, recall, f1, acc_class0, acc_class1, TPR, FPR = main(seed)
-        acc_list.append(acc * 100)
-        precision_list.append(precision * 100)
-        recall_list.append(recall * 100)
-        f1_list.append(f1 * 100)
-        acc_class0_list.append(acc_class0 * 100)
-        acc_class1_list.append(acc_class1 * 100)
+        print('traning {}th model\n'.format(i+1))
+        acc, precision, recall, f1, acc_class0, acc_class1 = main(seed)
+        acc_list.append(acc*100)
+        precision_list.append(precision*100)
+        recall_list.append(recall*100)
+        f1_list.append(f1*100)
+        acc_class0_list.append(acc_class0*100)
+        acc_class1_list.append(acc_class1*100)
         bacc_list.append((acc_class0 + acc_class1) * 50)
-        TPR_list.append(TPR * 100)
-        FPR_list.append(FPR * 100)
 
     print('acc:       {:.2f} + {:.2f}'.format(np.array(acc_list).mean(), np.std(acc_list)))
     print('precision: {:.2f} + {:.2f}'.format(np.array(precision_list).mean(), np.std(precision_list)))
@@ -309,6 +326,4 @@ if __name__ == "__main__":
     print('acc_class0:{:.2f} + {:.2f}'.format(np.array(acc_class0_list).mean(), np.std(acc_class0_list)))
     print('acc_class1:{:.2f} + {:.2f}'.format(np.array(acc_class1_list).mean(), np.std(acc_class1_list)))
     print('bAcc:      {:.2f} + {:.2f}'.format(np.array(bacc_list).mean(), np.std(bacc_list)))
-    print('TPR:       {:.2f} + {:.2f}'.format(np.array(TPR_list).mean(), np.std(TPR_list)))
-    print('FPR:       {:.2f} + {:.2f}'.format(np.array(FPR_list).mean(), np.std(FPR_list)))
     print('total time:', time.time() - t)
