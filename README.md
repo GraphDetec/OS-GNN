@@ -102,8 +102,10 @@ OS-GNN (backbone GAT)
 | MGTAB      | 86.75 </br> $_{0.74}$ | 85.39 </br> $_{0.71}$  | 87.18 </br> $_{0.50}$  |
 
        
+# Dataset
 
+For TwiBot-20, please visit the [Twibot-20 github repository](https://github.com/BunsenFeng/TwiBot-20).
+For MGTAB please visit the [MGTAB github repository](https://github.com/GraphDetec/MGTAB).
+For Cresci-15 please visit the [Twibot-20 github repository](https://github.com/GraphDetec/MGTAB).
 
-
-
-
+We also offer the processed data set: [Cresci-15](https://drive.google.com/uc?export=download&id=13J-UkHZ6tuZedOI0RUgEoHiMIJRGAdNC), [MGTAB](https://drive.google.com/uc?export=download&id=1XfLYIz4M3KPnVpsEUwRMddSs548y29a5), [Twibot-20](https://drive.google.com/uc?export=download&id=1VtpWZzzRyze_5xIy2f1T6jV5lzyj1Oc9).
