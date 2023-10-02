@@ -1,4 +1,4 @@
-# OS3-GNN
+# OS-GNN
 Over-Sampling Strategy in Feature Space for Graphs based Class-imbalanced Bot Detection
 
 # Environment Settings 
@@ -19,7 +19,7 @@ Over-Sampling Strategy in Feature Space for Graphs based Class-imbalanced Bot De
 
 ### Run models on bot detection datasets
 ````
-python OS3-GNN.py -dataset dataset -model model -smote smote
+python OS-GNN.py -dataset dataset -model model -smote smote
 ````
 * **dataset**: including \[MGTAB, Twibot20, Cresci15\].  
 * **model**: including \['GCN', 'GAT', 'SAGE', 'RGCN'\].  
@@ -27,24 +27,24 @@ python OS3-GNN.py -dataset dataset -model model -smote smote
 
 e.g.
 ````
-python OS3-GNN.py -dataset MGTAB -model GCN -smote False
-python OS3-GNN.py -dataset MGTAB -model GCN -smote True
-python OS3-GNN.py -dataset Twibot20 -model GAT -smote True
-python OS3-GNN.py -dataset Cresci15 -model RGCN -smote True
+python OS-GNN.py -dataset MGTAB -model GCN -smote False
+python OS-GNN.py -dataset MGTAB -model GCN -smote True
+python OS-GNN.py -dataset Twibot20 -model GAT -smote True
+python OS-GNN.py -dataset Cresci15 -model RGCN -smote True
 ````
 
 ### Run models on subgraph 
 (different imbalanced ratio)
 ````
-python subgraph-OS3-GNN.py -dataset dataset -model model -smote smote -ratio ratio
+python subgraph-OS-GNN.py -dataset dataset -model model -smote smote -ratio ratio
 ````
 
 * **ratio**: in the interval \[0, 1\]. 
 
 e.g.
 ````
-python subgraph-OS3-GNN.py -dataset MGTAB -model GCN -smote False -ratio 0.05
-python subgraph-OS3-GNN.py -dataset Twibot20 -model GAT -smote False -ratio 0.20
+python subgraph-OS-GNN.py -dataset MGTAB -model GCN -smote False -ratio 0.05
+python subgraph-OS-GNN.py -dataset Twibot20 -model GAT -smote False -ratio 0.20
 ````
 
 ### Run reweighting method
@@ -77,7 +77,7 @@ GCN
 | MGTAB      | 82.69 </br> $_{0.76}$ |  74.85 </br> $_{1.32}$ | 72.32 </br> $_{1.29}$  |
      
 
-OS3-GNN (backbone GCN)
+OS-GNN (backbone GCN)
 
 | Dataset    | Accuracy         | F1-macro          | Balanced accuracy |
 | -----------| -----------------| ----------------- |-------------------|
@@ -93,7 +93,7 @@ GAT
 | Cresci-15  | 96.49 </br> $_{0.15}$ |  96.18 </br> $_{0.30}$ | 95.86 </br> $_{0.39}$  |
 | MGTAB      | 84.46 </br> $_{1.13}$ |  80.47 </br> $_{1.29}$ | 79.35 </br> $_{1.58}$  |
 
-OS3-GNN (backbone GAT)
+OS-GNN (backbone GAT)
 
 | Dataset    | Accuracy         | F1-macro          | Balanced accuracy |
 | -----------| -----------------| ----------------- |-------------------|
